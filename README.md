@@ -1,10 +1,11 @@
-# KORG Gadget VR: SteamVR controller fix (unofficial)
+# KORG Gadget VR: SteamVR controller and height fix (unofficial)
 
 On Steam, KORG Gadget VR only officially supports a Quest connected through
 Oculus Link. On any other SteamVR setup (Steam Frame, Index, Vive, Pico, a Quest
-over Steam Link, ALVR or Virtual Desktop) the controllers are not tracked and the
-buttons do nothing. This repo adds the missing SteamVR controller bindings so the
-game gets the same buttons a Quest on Oculus Link gets.
+over Steam Link, ALVR or Virtual Desktop) the controllers are not tracked, the
+buttons do nothing, and you start far above the desk. This repo adds the missing
+SteamVR controller bindings, so the game gets the same buttons a Quest on Oculus
+Link gets. It also has an optional mod that puts the view back at the desk.
 
 ## A note to KORG
 
@@ -15,14 +16,15 @@ game gets the same buttons a Quest on Oculus Link gets.
 >
 > — C0ldbloodthe0ry
 
-The findings below, the binding files and the tools are MIT-licensed. Take whatever helps.
+Everything here is free to use under MIT-0, with no credit, attribution or
+acknowledgement needed. Take whatever helps and ship it as your own.
 
 ## What it fixes, and what it doesn't
 
 | Problem | Status |
 |---|---|
 | Controllers not tracked / buttons do nothing under SteamVR | **Fixed by this repo** |
-| You spawn a meter or more above the desk | Not fixed. Workaround [below](#spawning-too-high) |
+| You spawn a meter or more above the desk | **Fixed by the optional [height mod](#spawning-too-high-the-height-mod)** |
 | Doesn't start properly under Virtual Desktop (acknowledged by KORG) | Not addressed |
 | No sound (one report on Index) | Unknown |
 
@@ -30,7 +32,7 @@ The findings below, the binding files and the tools are MIT-licensed. Take whate
 
 | Setup | Result |
 |---|---|
-| Steam Frame, Linux (CachyOS, Proton), SteamVR 2.19.3 beta | Testing in progress |
+| Steam Frame, Linux (CachyOS, Proton), SteamVR 2.19.4 | Controllers work. Height fixed by the height mod |
 | Quest over SteamVR (Steam Link, ALVR, Virtual Desktop in SteamVR mode) | Untested, please report |
 | Index, Vive wands, Pico, WMR / HP Reverb, PSVR2, Focus 3, Cosmos | Untested, please report |
 
@@ -98,20 +100,53 @@ The other controllers in the table above get no file of their own. SteamVR adapt
 the Touch binding to them automatically. To change anything, open SteamVR
 Settings → Controllers → Manage Controller Bindings → KORG Gadget VR.
 
-## Spawning too high
+## Spawning too high: the height mod
 
-This happens under SteamVR on every headset reported so far. KORG has acknowledged
-"issues with viewpoint". Until the game fixes it:
+Under SteamVR the game adds your real head height on top of its own camera
+height, so you float above the desk. KORG has acknowledged "issues with
+viewpoint". `height-mod/` is a small Lua mod for
+[UE4SS](https://github.com/UE4SS-RE/RE-UE4SS), the open-source Unreal mod loader.
+Once the headset is tracking, it switches the game to an eye-level origin and
+recenters, which is how the game behaves on a Quest. Press **F8** on the keyboard
+to recenter at any time.
 
-- **OVR Advanced Settings** (free on Steam, Windows and Linux): use its playspace
-  offset to move your height down until the desk sits where your hands are.
-- **Experimental:** the launch option `-hmd=OpenXRHMD` makes the game use its
-  built-in OpenXR backend instead of SteamVR's. Tracking may then behave
-  differently. Untested.
+UE4SS is not included in this repo. The Linux installer downloads the official
+v4.0.0 release and checks its SHA-256 before installing.
+
+**Linux / SteamOS:**
+
+```sh
+./height-mod/install.sh            # or: ./height-mod/install.sh /path/to/GadgetVRGame
+```
+
+Then set the game's launch options in Steam (Properties → General):
+
+```
+WINEDLLOVERRIDES="dwmapi=n,b" %command%
+```
+
+Start the game, sit or stand the way you'll play, and wait about 5 seconds.
+To undo, run `./height-mod/install.sh --uninstall` and clear the launch option.
+Steam's Verify integrity does not remove the mod. If you already use UE4SS for
+other mods, the installer only adds this one.
+
+**Windows (by hand, untested):**
+
+1. Download `UE4SS_v4.0.0.zip` from the
+   [UE4SS releases](https://github.com/UE4SS-RE/RE-UE4SS/releases/tag/v4.0.0).
+2. Extract it into `GadgetVRGame\Binaries\Win64`, next to `GadgetGame-Win64-Shipping.exe`.
+3. Copy `height-mod\KorgGadgetHeightFix` into `Win64\ue4ss\Mods\`.
+4. Add `KorgGadgetHeightFix : 1` as the first line of `Win64\ue4ss\Mods\mods.txt`.
+
+Windows needs no launch option.
+
+**Without a mod:** OVR Advanced Settings (free on Steam) can lower your view with
+its playspace offset instead.
 
 ## For KORG / DETUNE developers
 
-Measured on build 15331537. Nothing here needs the source code.
+Measured on build 15331537. Nothing here needs the source code, and you're free
+to use any of it without credit.
 
 1. **The cause of the dead controllers:** `Config/SteamVRBindings/steamvr_manifest.json`
    ships with no `default_bindings`, and no binding files ship next to it.
@@ -128,10 +163,16 @@ Measured on build 15331537. Nothing here needs the source code.
    OpenXRHMD 20, and the OpenXR plugin is already enabled. UE 4.27's OpenXR path
    with the existing key mappings would cover every OpenXR headset through
    interaction profiles.
-4. **The floating viewpoint** fits a game built around an eye-level tracking origin
-   while SteamVR reports a floor-level one. The exe contains `vr.TrackingOrigin`.
-   Setting the origin explicitly at startup and placing the pawn to match would
-   likely fix it. This is a hypothesis, not confirmed.
+4. **The floating viewpoint.** No Blueprint in the pak calls `SetTrackingOrigin`.
+   The name appears only in the engine's redirect list, and the startup map only
+   calls `GetHMDDeviceName` and `IsHeadMountedDisplayEnabled`. So the game runs
+   with each runtime's default origin, which under SteamVR is the floor. The view
+   ends up about one head-height too high, which fits a scene laid out for an
+   eye-level origin. `vr.TrackingOrigin` is a console command, not a variable, so
+   `Engine.ini` can't set it. **Confirmed fix:** calling `SetTrackingOrigin(Eye Level)`
+   once at startup puts the view back at the desk. On a Steam Frame the head then
+   measured within a few cm of the game's camera height. In the game that is one
+   Blueprint node. Here the UE4SS mod in `height-mod/` does it from outside.
 
 ## Contributing
 
@@ -149,15 +190,21 @@ Modifications are more than welcome.
   ```
 
   Open a pull request and say what you tested on.
+- **Height mod:** the settings are at the top of
+  `height-mod/KorgGadgetHeightFix/Scripts/main.lua`. A Windows installer for it
+  would be welcome.
 - Please don't commit files from the game itself.
 
 ## Disclaimer
 
 Unofficial. Not affiliated with or endorsed by KORG Inc. or DETUNE Ltd. KORG and
-KORG Gadget are trademarks of KORG Inc. This repo contains no game files. It adds
-two small binding files to your own installation and edits one config file that
-Steam can restore.
+KORG Gadget are trademarks of KORG Inc. This repo contains no game files. The
+controller fix adds two small binding files to your own installation and edits one
+config file that Steam can restore. The optional height mod adds UE4SS and one Lua
+script to the game folder.
 
 ## License
 
-[MIT](LICENSE)
+[MIT-0](LICENSE) (MIT No Attribution): use, copy, change and ship any of it.
+No credit or acknowledgement needed. UE4SS is a separate project under its own
+MIT license. It is downloaded from its official release, not included here.
